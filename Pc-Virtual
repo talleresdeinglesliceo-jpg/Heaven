@@ -1,0 +1,1151 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
+local player = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+
+-- ===== ESTADO MANUAL DE EQUIPOS Y EXCLUSIONES =====
+local playerManualSide = {}   -- [UserId] = "BLUE" | "RED"
+local playerExcludedNo = {}   -- [UserId] = true (marcado como "NO" / ignorado)
+local lockedTargetTorso = nil
+
+-- ===== FÁBRICA DE MODELOS / ESTILOS DE CURSOR =====
+local CursorStyles = {}
+
+local function makePart(parent, size, pos, color, cornerScaleOrPx, zIndex, transp, rotation)
+	local frame = Instance.new("Frame")
+	frame.AnchorPoint = Vector2.new(0.5, 0.5)
+	frame.Size = size
+	frame.Position = pos
+	frame.BackgroundColor3 = color
+	frame.BackgroundTransparency = transp or 0
+	frame.BorderSizePixel = 0
+	frame.ZIndex = zIndex or 2
+	frame.Rotation = rotation or 0
+	frame.Parent = parent
+
+	if cornerScaleOrPx then
+		local corner = Instance.new("UICorner")
+		if cornerScaleOrPx >= 50 then
+			corner.CornerRadius = UDim.new(1, 0)
+		else
+			corner.CornerRadius = UDim.new(0, cornerScaleOrPx)
+		end
+		corner.Parent = frame
+	end
+	return frame
+end
+
+-- Predeterminado 1 (Sin arma): Punto pequeño con sombra sutil alrededor
+CursorStyles["PuntoSombra"] = function(parent)
+	local holder = Instance.new("Frame")
+	holder.AnchorPoint = Vector2.new(0.5, 0.5)
+	holder.Size = UDim2.new(0, 16, 0, 16)
+	holder.Position = UDim2.new(0.5, 0, 0.5, 0)
+	holder.BackgroundTransparency = 1
+	holder.Parent = parent
+
+	makePart(holder, UDim2.new(0, 12, 0, 12), UDim2.new(0.5, 0, 0.5, 0), Color3.fromRGB(0, 0, 0), 99, 1, 0.8)
+	makePart(holder, UDim2.new(0, 8, 0, 8), UDim2.new(0.5, 0, 0.5, 0), Color3.fromRGB(0, 0, 0), 99, 2, 0.58)
+
+	local dot = makePart(holder, UDim2.new(0, 4, 0, 4), UDim2.new(0.5, 0, 0.5, 0), Color3.fromRGB(255, 255, 255), 99, 3, 0)
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 1
+	stroke.Color = Color3.fromRGB(0, 0, 0)
+	stroke.Transparency = 0.35
+	stroke.Parent = dot
+end
+
+-- Predeterminado 2 (Con arma): Mira fucsia
+CursorStyles["MiraFucsia"] = function(parent)
+	local pink = Color3.fromRGB(255, 0, 128)
+	makePart(parent, UDim2.new(0, 4, 0, 4), UDim2.new(0.5, 0, 0.5, -5), pink, 1)
+	makePart(parent, UDim2.new(0, 4, 0, 4), UDim2.new(0.5, 0, 0.5, 5), pink, 1)
+	makePart(parent, UDim2.new(0, 8, 0, 2), UDim2.new(0.5, -8, 0.5, 0), pink, 1)
+	makePart(parent, UDim2.new(0, 8, 0, 2), UDim2.new(0.5, 8, 0.5, 0), pink, 1)
+end
+
+-- Ojo fucsia
+CursorStyles["OjoFucsia"] = function(parent)
+	local eyeBody = makePart(parent, UDim2.new(0, 26, 0, 10), UDim2.new(0.5, 0, 0.5, 0), Color3.fromRGB(245, 245, 245), 99, 1)
+	local eyeStroke = Instance.new("UIStroke")
+	eyeStroke.Thickness = 1
+	eyeStroke.Color = Color3.fromRGB(15, 15, 15)
+	eyeStroke.Parent = eyeBody
+
+	makePart(parent, UDim2.new(0, 10, 0, 10), UDim2.new(0.5, 0, 0.5, 0), Color3.fromRGB(255, 0, 175), 99, 2)
+	makePart(parent, UDim2.new(0, 4, 0, 6), UDim2.new(0.5, 0, 0.5, 0), Color3.fromRGB(12, 12, 14), 1, 3)
+end
+
+-- Cruz abierta blanca con doble barra vertical
+CursorStyles["CruzAbiertaBlanca"] = function(parent)
+	local white = Color3.fromRGB(240, 240, 240)
+	local gray = Color3.fromRGB(150, 150, 150)
+	makePart(parent, UDim2.new(0, 2, 0, 4), UDim2.new(0.5, 0, 0.5, -5), white, 0, 2)
+	makePart(parent, UDim2.new(0, 2, 0, 2), UDim2.new(0.5, 0, 0.5, -8), gray, 0, 3)
+	makePart(parent, UDim2.new(0, 2, 0, 4), UDim2.new(0.5, 0, 0.5, 5), white, 0, 2)
+	makePart(parent, UDim2.new(0, 2, 0, 2), UDim2.new(0.5, 0, 0.5, 8), gray, 0, 3)
+	makePart(parent, UDim2.new(0, 5, 0, 2), UDim2.new(0.5, -6, 0.5, 0), white, 0, 2)
+	makePart(parent, UDim2.new(0, 5, 0, 2), UDim2.new(0.5, 6, 0.5, 0), white, 0, 2)
+end
+
+-- Cruz compacta blanca cerrada
+CursorStyles["CruzCompactaBlanca"] = function(parent)
+	local white = Color3.fromRGB(245, 245, 245)
+	makePart(parent, UDim2.new(0, 2, 0, 10), UDim2.new(0.5, 0, 0.5, 0), white, 0, 2)
+	makePart(parent, UDim2.new(0, 10, 0, 2), UDim2.new(0.5, 0, 0.5, 0), white, 0, 2)
+end
+
+-- Cruz media blanca
+CursorStyles["CruzMediaBlanca"] = function(parent)
+	local white = Color3.fromRGB(235, 235, 235)
+	makePart(parent, UDim2.new(0, 2, 0, 12), UDim2.new(0.5, 0, 0.5, 0), white, 0, 2)
+	makePart(parent, UDim2.new(0, 12, 0, 2), UDim2.new(0.5, 0, 0.5, 0), white, 0, 2)
+end
+
+-- Cruz azul
+CursorStyles["CruzAzul"] = function(parent)
+	local blue = Color3.fromRGB(0, 40, 235)
+	makePart(parent, UDim2.new(0, 3, 0, 11), UDim2.new(0.5, 0, 0.5, 0), blue, 1, 2)
+	makePart(parent, UDim2.new(0, 11, 0, 3), UDim2.new(0.5, 0, 0.5, 0), blue, 1, 2)
+end
+
+-- Cruz redondeada
+CursorStyles["CruzRedondeada"] = function(parent)
+	local dark = Color3.fromRGB(15, 15, 15)
+	makePart(parent, UDim2.new(0, 3, 0, 12), UDim2.new(0.5, 0, 0.5, 0), dark, 2, 2)
+	makePart(parent, UDim2.new(0, 12, 0, 3), UDim2.new(0.5, 0, 0.5, 0), dark, 2, 2)
+end
+
+-- Cruz blanca con centro rojo
+CursorStyles["CruzCentroRojo"] = function(parent)
+	local white = Color3.fromRGB(235, 235, 235)
+	local redCenter = Color3.fromRGB(190, 55, 65)
+	makePart(parent, UDim2.new(0, 3, 0, 12), UDim2.new(0.5, 0, 0.5, 0), white, 1, 2)
+	makePart(parent, UDim2.new(0, 12, 0, 3), UDim2.new(0.5, 0, 0.5, 0), white, 1, 2)
+	makePart(parent, UDim2.new(0, 2, 0, 2), UDim2.new(0.5, 0, 0.5, 0), redCenter, 0, 3)
+end
+
+-- Shuriken morado de tres puntas
+CursorStyles["ShurikenMorado"] = function(parent)
+	local purple = Color3.fromRGB(82, 34, 120)
+	local outline = Color3.fromRGB(35, 25, 45)
+	makePart(parent, UDim2.new(0, 6, 0, 6), UDim2.new(0.5, 0, 0.5, 0), purple, 99, 3)
+
+	local angles = {0, 120, 240}
+	for _, deg in ipairs(angles) do
+		local rad = math.rad(deg)
+		local ox = math.cos(rad) * 5
+		local oy = math.sin(rad) * 5
+		local blade = makePart(parent, UDim2.new(0, 10, 0, 3), UDim2.new(0.5, ox, 0.5, oy), purple, 2, 2, 0, deg - 22)
+		local st = Instance.new("UIStroke")
+		st.Thickness = 0.8
+		st.Color = outline
+		st.Transparency = 0.35
+		st.Parent = blade
+	end
+end
+
+-- Cruz pequeña blanca
+CursorStyles["CruzPequenaBlanca"] = function(parent)
+	local white = Color3.fromRGB(235, 235, 235)
+	makePart(parent, UDim2.new(0, 2, 0, 9), UDim2.new(0.5, 0, 0.5, 0), white, 1, 2)
+	makePart(parent, UDim2.new(0, 9, 0, 2), UDim2.new(0.5, 0, 0.5, 0), white, 1, 2)
+end
+
+-- Cruz azul fina
+CursorStyles["CruzAzulFina"] = function(parent)
+	local blue = Color3.fromRGB(16, 92, 168)
+	makePart(parent, UDim2.new(0, 2, 0, 9), UDim2.new(0.5, 0, 0.5, 0), blue, 1, 2)
+	makePart(parent, UDim2.new(0, 9, 0, 2), UDim2.new(0.5, 0, 0.5, 0), blue, 1, 2)
+end
+
+-- Equis gris clara
+CursorStyles["EquisGris"] = function(parent)
+	local gray = Color3.fromRGB(145, 145, 150)
+	makePart(parent, UDim2.new(0, 2, 0, 10), UDim2.new(0.5, 0, 0.5, 0), gray, 1, 2, 0, 45)
+	makePart(parent, UDim2.new(0, 2, 0, 10), UDim2.new(0.5, 0, 0.5, 0), gray, 1, 2, 0, -45)
+end
+
+-- Cruz roja difusa
+CursorStyles["CruzRojaDifusa"] = function(parent)
+	local glow = Color3.fromRGB(115, 22, 28)
+	local core = Color3.fromRGB(55, 10, 14)
+	makePart(parent, UDim2.new(0, 6, 0, 14), UDim2.new(0.5, 0, 0.5, 0), glow, 2, 1, 0.45)
+	makePart(parent, UDim2.new(0, 14, 0, 6), UDim2.new(0.5, 0, 0.5, 0), glow, 2, 1, 0.45)
+	makePart(parent, UDim2.new(0, 3, 0, 10), UDim2.new(0.5, 0, 0.5, 0), core, 1, 2, 0.25)
+	makePart(parent, UDim2.new(0, 10, 0, 3), UDim2.new(0.5, 0, 0.5, 0), core, 1, 2, 0.25)
+end
+
+-- Punto morado
+CursorStyles["PuntoMorado"] = function(parent)
+	local purple = Color3.fromRGB(92, 48, 178)
+	makePart(parent, UDim2.new(0, 6, 0, 6), UDim2.new(0.5, 0, 0.5, 0), purple, 99, 2)
+end
+
+-- Corazón blanco
+CursorStyles["CorazonBlanco"] = function(parent)
+	local white = Color3.fromRGB(245, 245, 245)
+	makePart(parent, UDim2.new(0, 5, 0, 5), UDim2.new(0.5, -2, 0.5, -1.5), white, 99, 2)
+	makePart(parent, UDim2.new(0, 5, 0, 5), UDim2.new(0.5, 2, 0.5, -1.5), white, 99, 2)
+	makePart(parent, UDim2.new(0, 6, 0, 6), UDim2.new(0.5, 0, 0.5, 0.5), white, 1, 2, 0, 45)
+end
+
+-- Cursor clásico de Windows (flecha blanca con borde oscuro)
+CursorStyles["Windows"] = function(parent)
+	local white = Color3.fromRGB(255, 255, 255)
+	local border = Color3.fromRGB(15, 15, 18)
+
+	local shaft = makePart(parent, UDim2.new(0, 3, 0, 15), UDim2.new(0.5, -3, 0.5, 1), white, 0, 3, 0, -28)
+	local wing1 = makePart(parent, UDim2.new(0, 3, 0, 9), UDim2.new(0.5, 0, 0.5, -1), white, 0, 3, 0, -68)
+	local wing2 = makePart(parent, UDim2.new(0, 3, 0, 8), UDim2.new(0.5, -1, 0.5, 3), white, 0, 3, 0, 18)
+
+	for _, part in ipairs({shaft, wing1, wing2}) do
+		local st = Instance.new("UIStroke")
+		st.Thickness = 1
+		st.Color = border
+		st.Parent = part
+	end
+end
+
+local styleOrder = {
+	"PuntoSombra",
+	"MiraFucsia",
+	"OjoFucsia",
+	"CruzAbiertaBlanca",
+	"CruzCompactaBlanca",
+	"CruzMediaBlanca",
+	"CruzAzul",
+	"CruzRedondeada",
+	"CruzCentroRojo",
+	"ShurikenMorado",
+	"CruzPequenaBlanca",
+	"CruzAzulFina",
+	"EquisGris",
+	"CruzRojaDifusa",
+	"PuntoMorado",
+	"CorazonBlanco",
+	"Windows"
+}
+
+local function isValidStyle(name)
+	return type(name) == "string" and CursorStyles[name] ~= nil
+end
+
+-- ===== AUTOGUARDADO SILENCIOSO DE CURSORES =====
+local SAVE_FILE = "HeavenCrosshairConfig.json"
+
+local function loadSavedCrosshairs(playerGui)
+	local unarmed = "PuntoSombra"
+	local armed = "MiraFucsia"
+
+	pcall(function()
+		if type(isfile) == "function" and type(readfile) == "function" and isfile(SAVE_FILE) then
+			local decoded = HttpService:JSONDecode(readfile(SAVE_FILE))
+			if type(decoded) == "table" then
+				if isValidStyle(decoded.unarmed) then
+					unarmed = decoded.unarmed
+				end
+				if isValidStyle(decoded.armed) then
+					armed = decoded.armed
+				end
+			end
+		end
+	end)
+
+	pcall(function()
+		local env = (type(getgenv) == "function") and getgenv() or nil
+		if env and type(env.HeavenSavedCrosshairs) == "table" then
+			if isValidStyle(env.HeavenSavedCrosshairs.unarmed) then
+				unarmed = env.HeavenSavedCrosshairs.unarmed
+			end
+			if isValidStyle(env.HeavenSavedCrosshairs.armed) then
+				armed = env.HeavenSavedCrosshairs.armed
+			end
+		end
+	end)
+
+	if playerGui then
+		local attrU = playerGui:GetAttribute("HeavenUnarmedStyle")
+		local attrA = playerGui:GetAttribute("HeavenArmedStyle")
+		if isValidStyle(attrU) then unarmed = attrU end
+		if isValidStyle(attrA) then armed = attrA end
+	end
+
+	return unarmed, armed
+end
+
+local function saveCrosshairsSilently(playerGui, unarmed, armed)
+	pcall(function()
+		local env = (type(getgenv) == "function") and getgenv() or nil
+		if env then
+			env.HeavenSavedCrosshairs = {
+				unarmed = unarmed,
+				armed = armed
+			}
+		end
+	end)
+
+	if playerGui then
+		pcall(function()
+			playerGui:SetAttribute("HeavenUnarmedStyle", unarmed)
+			playerGui:SetAttribute("HeavenArmedStyle", armed)
+		end)
+	end
+
+	pcall(function()
+		if type(writefile) == "function" then
+			writefile(SAVE_FILE, HttpService:JSONEncode({
+				unarmed = unarmed,
+				armed = armed
+			}))
+		end
+	end)
+end
+
+-- ===== DETECCIÓN DE JUGADOR EN PARTIDA ACTIVA CONMIGO =====
+local function getTargetTorso(char)
+	if not char then return nil end
+	return char:FindFirstChild("UpperTorso")
+		or char:FindFirstChild("Torso")
+		or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function isInMatchWithMe(otherPlayer)
+	if not otherPlayer or otherPlayer == player then
+		return false
+	end
+
+	local myChar = player.Character
+	local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+	local myRoot = myChar and getTargetTorso(myChar)
+	if not myChar or not myHum or myHum.Health <= 0 or not myRoot then
+		return false
+	end
+
+	local otherChar = otherPlayer.Character
+	local otherHum = otherChar and otherChar:FindFirstChildOfClass("Humanoid")
+	local otherTorso = otherChar and getTargetTorso(otherChar)
+	if not otherChar or not otherHum or otherHum.Health <= 0 or not otherTorso then
+		return false
+	end
+
+	-- Verifica que esté en Workspace y en un estado activo (no sentado en lobby ni muerto)
+	if not otherChar:IsDescendantOf(Workspace) then
+		return false
+	end
+
+	local state = otherHum:GetState()
+	if state == Enum.HumanoidStateType.Dead or state == Enum.HumanoidStateType.None then
+		return false
+	end
+
+	-- Si el juego usa atributos o carpetas de partida/ronda/sala, valida coincidencia si existen
+	local myMatch = player:GetAttribute("MatchId") or player:GetAttribute("RoundId") or player:GetAttribute("Arena")
+	local otherMatch = otherPlayer:GetAttribute("MatchId") or otherPlayer:GetAttribute("RoundId") or otherPlayer:GetAttribute("Arena")
+	if myMatch ~= nil and otherMatch ~= nil and tostring(myMatch) ~= tostring(otherMatch) then
+		return false
+	end
+
+	return true
+end
+
+-- ===== TEAM CHECK (sameTeam) =====
+local function sameTeam(a, b)
+	if not a or not b then
+		return false
+	end
+
+	local r1, r2 = a:GetAttribute("Role"), b:GetAttribute("Role")
+
+	if r1 ~= nil and r2 ~= nil then
+		local s1, s2 = tostring(r1), tostring(r2)
+
+		if s1 ~= "FFA" and s2 ~= "FFA"
+			and s1 ~= "" and s2 ~= ""
+			and s1 ~= "none" and s2 ~= "none" then
+
+			return s1 == s2
+		end
+	end
+
+	local t1, t2 = a:GetAttribute("Team"), b:GetAttribute("Team")
+
+	if t1 ~= nil and t2 ~= nil then
+		local s1, s2 = tostring(t1), tostring(t2)
+
+		if s1 ~= "" and s2 ~= "" then
+			return s1 == s2
+		end
+	end
+
+	return a.Team ~= nil
+		and b.Team ~= nil
+		and a.Team == b.Team
+end
+
+local function isEnemy(otherPlayer)
+	if not otherPlayer or otherPlayer == player then
+		return false
+	end
+
+	if playerExcludedNo[otherPlayer.UserId] == true then
+		return false
+	end
+
+	if not isInMatchWithMe(otherPlayer) then
+		return false
+	end
+
+	local mySide = playerManualSide[player.UserId]
+	local otherSide = playerManualSide[otherPlayer.UserId]
+	if mySide and otherSide then
+		return mySide ~= otherSide
+	end
+
+	if sameTeam(player, otherPlayer) then
+		return false
+	end
+
+	return true
+end
+
+-- Solo devuelve true si no hay nada (paredes, objetos, obstáculos) cubriendo al objetivo
+local function isNotCovered(cam, myChar, enemyChar, targetPart)
+	local origin = cam.CFrame.Position
+	local direction = targetPart.Position - origin
+	if direction.Magnitude <= 0.05 then
+		return false
+	end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local ignoreList = {myChar}
+	if cam.CameraSubject and cam.CameraSubject:IsA("BasePart") then
+		table.insert(ignoreList, cam.CameraSubject)
+	end
+	params.FilterDescendantsInstances = ignoreList
+
+	local result = Workspace:Raycast(origin, direction, params)
+	if not result then
+		return false
+	end
+
+	return result.Instance:IsDescendantOf(enemyChar)
+end
+
+local function initializeScript()
+	local playerGui = player:WaitForChild("PlayerGui", 15)
+	if not playerGui then return end
+
+	if playerGui:FindFirstChild("CustomCrosshairHUD") then
+		playerGui.CustomCrosshairHUD:Destroy()
+	end
+
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "CustomCrosshairHUD"
+	screenGui.ResetOnSpawn = false
+	screenGui.DisplayOrder = 999
+	screenGui.Parent = playerGui
+
+	local defaultPos = UDim2.new(0.5, 0, 0.5, -53)
+
+	local crosshairContainer = Instance.new("Frame")
+	crosshairContainer.Name = "CrosshairContainer"
+	crosshairContainer.AnchorPoint = Vector2.new(0.5, 0.5)
+	crosshairContainer.Size = UDim2.new(0, 40, 0, 40)
+	crosshairContainer.Position = defaultPos
+	crosshairContainer.BackgroundTransparency = 1
+	crosshairContainer.Parent = screenGui
+
+	local visualHolder = Instance.new("Frame")
+	visualHolder.Name = "VisualHolder"
+	visualHolder.AnchorPoint = Vector2.new(0.5, 0.5)
+	visualHolder.Size = UDim2.new(0, 40, 0, 40)
+	visualHolder.Position = UDim2.new(0.5, 0, 0.5, 0)
+	visualHolder.BackgroundTransparency = 1
+	visualHolder.Parent = crosshairContainer
+
+	local styleContainers = {}
+	for _, styleName in ipairs(styleOrder) do
+		local container = Instance.new("Frame")
+		container.Name = "Style_" .. styleName
+		container.AnchorPoint = Vector2.new(0.5, 0.5)
+		container.Size = UDim2.new(1, 0, 1, 0)
+		container.Position = UDim2.new(0.5, 0, 0.5, 0)
+		container.BackgroundTransparency = 1
+		container.Visible = false
+		container.Parent = visualHolder
+
+		local builder = CursorStyles[styleName]
+		if builder then
+			builder(container)
+		end
+		styleContainers[styleName] = container
+	end
+
+	local selectedUnarmedStyle, selectedArmedStyle = loadSavedCrosshairs(playerGui)
+	local currentHasWeapon = false
+
+	local function refreshCrosshairVisual()
+		local chosenName = currentHasWeapon and selectedArmedStyle or selectedUnarmedStyle
+		for name, container in pairs(styleContainers) do
+			container.Visible = (name == chosenName)
+		end
+	end
+
+	local function setCrosshairStyle(hasWeapon)
+		currentHasWeapon = hasWeapon
+		refreshCrosshairVisual()
+	end
+
+	refreshCrosshairVisual()
+
+	-- ===== PANEL FPS COUNTER (MANTIENE SU TAMAÑO ORIGINAL, FONDO NEGRO Y NÚMEROS VERDES) =====
+	local fpsFrame = Instance.new("Frame")
+	fpsFrame.Name = "FPSStatsPanel"
+	fpsFrame.Size = UDim2.new(0, 310, 0, 85)
+	fpsFrame.Position = UDim2.new(0, 10, 0, 10)
+	fpsFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	fpsFrame.BackgroundTransparency = 0.2
+	fpsFrame.BorderSizePixel = 0
+	fpsFrame.Parent = screenGui
+
+	local fpsCorner = Instance.new("UICorner")
+	fpsCorner.CornerRadius = UDim.new(0, 8)
+	fpsCorner.Parent = fpsFrame
+
+	local fpsStroke = Instance.new("UIStroke")
+	fpsStroke.Thickness = 1.5
+	fpsStroke.Color = Color3.fromRGB(50, 50, 50)
+	fpsStroke.Parent = fpsFrame
+
+	local function createStatLabel(name, posY)
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.new(1, -16, 0, 18)
+		lbl.Position = UDim2.new(0, 10, 0, posY)
+		lbl.BackgroundTransparency = 1
+		lbl.Font = Enum.Font.Code
+		lbl.TextSize = 13
+		lbl.TextColor3 = Color3.fromRGB(50, 255, 100)
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.Text = name
+		lbl.Parent = fpsFrame
+		return lbl
+	end
+
+	local lblFps = createStatLabel("FPS: ...", 6)
+	local lblPhysics = createStatLabel("Physics: ...", 26)
+	local lblRender = createStatLabel("Render: ...", 46)
+	local lblNetwork = createStatLabel("Network receive: ...", 66)
+
+	-- ===== INTERFAZ SELECTORA COMPACTA (1 = SIN ARMA / 2 = CON ARMA) =====
+	local selectorPanel = Instance.new("Frame")
+	selectorPanel.Name = "CursorSelectorPanel"
+	selectorPanel.Size = UDim2.new(0, 184, 0, 66)
+	selectorPanel.Position = UDim2.new(0, 10, 0, 102)
+	selectorPanel.BackgroundColor3 = Color3.fromRGB(12, 12, 14)
+	selectorPanel.BackgroundTransparency = 0.15
+	selectorPanel.BorderSizePixel = 0
+	selectorPanel.Parent = screenGui
+
+	local selCorner = Instance.new("UICorner")
+	selCorner.CornerRadius = UDim.new(0, 6)
+	selCorner.Parent = selectorPanel
+
+	local selStroke = Instance.new("UIStroke")
+	selStroke.Thickness = 1
+	selStroke.Color = Color3.fromRGB(60, 60, 65)
+	selStroke.Parent = selectorPanel
+
+	local titleLbl = Instance.new("TextLabel")
+	titleLbl.Size = UDim2.new(1, -40, 0, 13)
+	titleLbl.Position = UDim2.new(0, 6, 0, 2)
+	titleLbl.BackgroundTransparency = 1
+	titleLbl.Font = Enum.Font.Code
+	titleLbl.TextSize = 10
+	titleLbl.TextColor3 = Color3.fromRGB(220, 220, 220)
+	titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+	titleLbl.Text = "CURSORES"
+	titleLbl.Parent = selectorPanel
+
+	local heavenTag = Instance.new("TextLabel")
+	heavenTag.Size = UDim2.new(1, -12, 0, 9)
+	heavenTag.Position = UDim2.new(0, 6, 0, 13)
+	heavenTag.BackgroundTransparency = 1
+	heavenTag.Font = Enum.Font.Code
+	heavenTag.TextSize = 8
+	heavenTag.TextColor3 = Color3.fromRGB(150, 150, 160)
+	heavenTag.TextXAlignment = Enum.TextXAlignment.Left
+	heavenTag.Text = "by Heaven"
+	heavenTag.Parent = selectorPanel
+
+	local toggleBtn = Instance.new("TextButton")
+	toggleBtn.Size = UDim2.new(0, 28, 0, 14)
+	toggleBtn.Position = UDim2.new(1, -33, 0, 4)
+	toggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+	toggleBtn.BorderSizePixel = 0
+	toggleBtn.Font = Enum.Font.Code
+	toggleBtn.TextSize = 8
+	toggleBtn.TextColor3 = Color3.fromRGB(50, 255, 100)
+	toggleBtn.Text = "HIDE"
+	toggleBtn.Parent = selectorPanel
+
+	local toggleCorner = Instance.new("UICorner")
+	toggleCorner.CornerRadius = UDim.new(0, 4)
+	toggleCorner.Parent = toggleBtn
+
+	local bodyHolder = Instance.new("Frame")
+	bodyHolder.Size = UDim2.new(1, 0, 1, -23)
+	bodyHolder.Position = UDim2.new(0, 0, 0, 23)
+	bodyHolder.BackgroundTransparency = 1
+	bodyHolder.Parent = selectorPanel
+
+	local function createOptionRow(prefix, posY, initialStyle, onCycle)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, -12, 0, 17)
+		btn.Position = UDim2.new(0, 6, 0, posY)
+		btn.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+		btn.BorderSizePixel = 0
+		btn.Font = Enum.Font.Code
+		btn.TextSize = 9
+		btn.TextColor3 = Color3.fromRGB(240, 240, 240)
+		btn.TextXAlignment = Enum.TextXAlignment.Left
+		btn.TextTruncate = Enum.TextTruncate.AtEnd
+		btn.Text = string.format(" %s: %s", prefix, initialStyle)
+		btn.Parent = bodyHolder
+
+		local bCorner = Instance.new("UICorner")
+		bCorner.CornerRadius = UDim.new(0, 4)
+		bCorner.Parent = btn
+
+		btn.MouseButton1Click:Connect(function()
+			local nextName = onCycle()
+			btn.Text = string.format(" %s: %s", prefix, nextName)
+		end)
+
+		return btn
+	end
+
+	local function getNextStyle(currentName)
+		for i, name in ipairs(styleOrder) do
+			if name == currentName then
+				return styleOrder[(i % #styleOrder) + 1]
+			end
+		end
+		return styleOrder[1]
+	end
+
+	createOptionRow("1 SIN ARMA", 0, selectedUnarmedStyle, function()
+		selectedUnarmedStyle = getNextStyle(selectedUnarmedStyle)
+		saveCrosshairsSilently(playerGui, selectedUnarmedStyle, selectedArmedStyle)
+		refreshCrosshairVisual()
+		return selectedUnarmedStyle
+	end)
+
+	createOptionRow("2 CON ARMA", 19, selectedArmedStyle, function()
+		selectedArmedStyle = getNextStyle(selectedArmedStyle)
+		saveCrosshairsSilently(playerGui, selectedUnarmedStyle, selectedArmedStyle)
+		refreshCrosshairVisual()
+		return selectedArmedStyle
+	end)
+
+	local minimized = false
+	toggleBtn.MouseButton1Click:Connect(function()
+		minimized = not minimized
+		bodyHolder.Visible = not minimized
+		if minimized then
+			selectorPanel.Size = UDim2.new(0, 184, 0, 24)
+			toggleBtn.Text = "SHOW"
+		else
+			selectorPanel.Size = UDim2.new(0, 184, 0, 66)
+			toggleBtn.Text = "HIDE"
+		end
+	end)
+
+	-- ===== INTERFAZ DE EQUIPOS COMPACTA + DETECCIÓN DE PARTIDA + FILTRO SÍ/NO =====
+	local teamPanel = Instance.new("Frame")
+	teamPanel.Name = "TeamSplitterPanel"
+	teamPanel.Size = UDim2.new(0, 196, 0, 152)
+	teamPanel.Position = UDim2.new(0, 10, 0, 174)
+	teamPanel.BackgroundColor3 = Color3.fromRGB(12, 12, 14)
+	teamPanel.BackgroundTransparency = 0.15
+	teamPanel.BorderSizePixel = 0
+	teamPanel.Parent = screenGui
+
+	local teamCorner = Instance.new("UICorner")
+	teamCorner.CornerRadius = UDim.new(0, 6)
+	teamCorner.Parent = teamPanel
+
+	local teamStroke = Instance.new("UIStroke")
+	teamStroke.Thickness = 1
+	teamStroke.Color = Color3.fromRGB(60, 60, 65)
+	teamStroke.Parent = teamPanel
+
+	local teamTitle = Instance.new("TextLabel")
+	teamTitle.Size = UDim2.new(1, -40, 0, 13)
+	teamTitle.Position = UDim2.new(0, 6, 0, 2)
+	teamTitle.BackgroundTransparency = 1
+	teamTitle.Font = Enum.Font.Code
+	teamTitle.TextSize = 10
+	teamTitle.TextColor3 = Color3.fromRGB(220, 220, 220)
+	teamTitle.TextXAlignment = Enum.TextXAlignment.Left
+	teamTitle.Text = "TEAMS & MATCH"
+	teamTitle.Parent = teamPanel
+
+	local teamHeavenTag = Instance.new("TextLabel")
+	teamHeavenTag.Size = UDim2.new(1, -12, 0, 9)
+	teamHeavenTag.Position = UDim2.new(0, 6, 0, 13)
+	teamHeavenTag.BackgroundTransparency = 1
+	teamHeavenTag.Font = Enum.Font.Code
+	teamHeavenTag.TextSize = 8
+	teamHeavenTag.TextColor3 = Color3.fromRGB(150, 150, 160)
+	teamHeavenTag.TextXAlignment = Enum.TextXAlignment.Left
+	teamHeavenTag.Text = "by Heaven"
+	teamHeavenTag.Parent = teamPanel
+
+	local teamToggleBtn = Instance.new("TextButton")
+	teamToggleBtn.Size = UDim2.new(0, 28, 0, 14)
+	teamToggleBtn.Position = UDim2.new(1, -33, 0, 4)
+	teamToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+	teamToggleBtn.BorderSizePixel = 0
+	teamToggleBtn.Font = Enum.Font.Code
+	teamToggleBtn.TextSize = 8
+	teamToggleBtn.TextColor3 = Color3.fromRGB(50, 255, 100)
+	teamToggleBtn.Text = "HIDE"
+	teamToggleBtn.Parent = teamPanel
+
+	local teamToggleCorner = Instance.new("UICorner")
+	teamToggleCorner.CornerRadius = UDim.new(0, 4)
+	teamToggleCorner.Parent = teamToggleBtn
+
+	local teamBody = Instance.new("Frame")
+	teamBody.Size = UDim2.new(1, 0, 1, -23)
+	teamBody.Position = UDim2.new(0, 0, 0, 23)
+	teamBody.BackgroundTransparency = 1
+	teamBody.Parent = teamPanel
+
+	-- Barra rápida para seleccionar SÍ (OK) / NO / Solo los de tu partida
+	local quickBar = Instance.new("Frame")
+	quickBar.Size = UDim2.new(1, -10, 0, 14)
+	quickBar.Position = UDim2.new(0, 5, 0, 2)
+	quickBar.BackgroundTransparency = 1
+	quickBar.Parent = teamBody
+
+	local function createQuickBtn(text, posX, width, bgColor, callback)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0, width, 1, 0)
+		btn.Position = UDim2.new(0, posX, 0, 0)
+		btn.BackgroundColor3 = bgColor
+		btn.BorderSizePixel = 0
+		btn.Font = Enum.Font.Code
+		btn.TextSize = 7
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		btn.Text = text
+		btn.Parent = quickBar
+
+		local c = Instance.new("UICorner")
+		c.CornerRadius = UDim.new(0, 3)
+		c.Parent = btn
+
+		btn.MouseButton1Click:Connect(callback)
+		return btn
+	end
+
+	local listScroll = Instance.new("ScrollingFrame")
+	listScroll.Size = UDim2.new(1, -10, 1, -20)
+	listScroll.Position = UDim2.new(0, 5, 0, 18)
+	listScroll.BackgroundTransparency = 1
+	listScroll.ScrollBarThickness = 2
+	listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	listScroll.Parent = teamBody
+
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 3)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = listScroll
+
+	local function createGroupHeader(text, color, order)
+		local hdr = Instance.new("TextLabel")
+		hdr.Size = UDim2.new(1, -2, 0, 12)
+		hdr.BackgroundTransparency = 1
+		hdr.Font = Enum.Font.Code
+		hdr.TextSize = 9
+		hdr.TextColor3 = color
+		hdr.TextXAlignment = Enum.TextXAlignment.Left
+		hdr.Text = text
+		hdr.LayoutOrder = order
+		hdr.Parent = listScroll
+	end
+
+	local function createPlayerEntry(targetPlr, sideName, inMatch, order)
+		local isNo = playerExcludedNo[targetPlr.UserId] == true
+
+		local row = Instance.new("Frame")
+		row.Size = UDim2.new(1, -2, 0, 18)
+		row.BackgroundColor3 = isNo and Color3.fromRGB(28, 16, 18) or Color3.fromRGB(22, 22, 26)
+		row.BorderSizePixel = 0
+		row.LayoutOrder = order
+		row.Parent = listScroll
+
+		local rCorner = Instance.new("UICorner")
+		rCorner.CornerRadius = UDim.new(0, 4)
+		rCorner.Parent = row
+
+		-- Indicador compacto de partida (MATCH en verde / LOBBY en gris)
+		local matchBadge = Instance.new("TextLabel")
+		matchBadge.Size = UDim2.new(0, 31, 0, 12)
+		matchBadge.Position = UDim2.new(0, 3, 0.5, -6)
+		matchBadge.BorderSizePixel = 0
+		matchBadge.Font = Enum.Font.Code
+		matchBadge.TextSize = 7
+		matchBadge.Text = (targetPlr == player or inMatch) and "MATCH" or "LOBBY"
+		matchBadge.BackgroundColor3 = (targetPlr == player or inMatch) and Color3.fromRGB(24, 68, 38) or Color3.fromRGB(40, 40, 46)
+		matchBadge.TextColor3 = (targetPlr == player or inMatch) and Color3.fromRGB(95, 255, 130) or Color3.fromRGB(165, 165, 175)
+		matchBadge.Parent = row
+
+		local mCorner = Instance.new("UICorner")
+		mCorner.CornerRadius = UDim.new(0, 3)
+		mCorner.Parent = matchBadge
+
+		local nameLbl = Instance.new("TextLabel")
+		nameLbl.Size = UDim2.new(1, -108, 1, 0)
+		nameLbl.Position = UDim2.new(0, 37, 0, 0)
+		nameLbl.BackgroundTransparency = 1
+		nameLbl.Font = Enum.Font.Code
+		nameLbl.TextSize = 8
+		nameLbl.TextColor3 = isNo and Color3.fromRGB(155, 145, 148) or Color3.fromRGB(235, 235, 240)
+		nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+		nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+		nameLbl.Text = targetPlr.Name
+		nameLbl.Parent = row
+
+		local sideBtn = Instance.new("TextButton")
+		sideBtn.Size = UDim2.new(0, 34, 0, 13)
+		sideBtn.Position = UDim2.new(1, -69, 0.5, -6.5)
+		sideBtn.BorderSizePixel = 0
+		sideBtn.Font = Enum.Font.Code
+		sideBtn.TextSize = 8
+		sideBtn.Text = sideName
+		if sideName == "BLUE" then
+			sideBtn.BackgroundColor3 = Color3.fromRGB(25, 95, 220)
+			sideBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		else
+			sideBtn.BackgroundColor3 = Color3.fromRGB(210, 45, 55)
+			sideBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		end
+		sideBtn.Parent = row
+
+		local sCorner = Instance.new("UICorner")
+		sCorner.CornerRadius = UDim.new(0, 3)
+		sCorner.Parent = sideBtn
+
+		-- Botón rápido SÍ (OK) / NO
+		local toggleNoBtn = Instance.new("TextButton")
+		toggleNoBtn.Size = UDim2.new(0, 31, 0, 13)
+		toggleNoBtn.Position = UDim2.new(1, -33, 0.5, -6.5)
+		toggleNoBtn.BorderSizePixel = 0
+		toggleNoBtn.Font = Enum.Font.Code
+		toggleNoBtn.TextSize = 8
+		toggleNoBtn.Text = isNo and "NO" or "SÍ"
+		toggleNoBtn.BackgroundColor3 = isNo and Color3.fromRGB(155, 32, 38) or Color3.fromRGB(34, 112, 52)
+		toggleNoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		toggleNoBtn.Parent = row
+
+		local nCorner = Instance.new("UICorner")
+		nCorner.CornerRadius = UDim.new(0, 3)
+		nCorner.Parent = toggleNoBtn
+
+		return sideBtn, toggleNoBtn
+	end
+
+	local function refreshTeamList()
+		for _, child in ipairs(listScroll:GetChildren()) do
+			if child:IsA("Frame") or child:IsA("TextLabel") then
+				child:Destroy()
+			end
+		end
+
+		local allPlayers = Players:GetPlayers()
+		local blueList = {}
+		local redList = {}
+
+		for _, p in ipairs(allPlayers) do
+			if not playerManualSide[p.UserId] then
+				playerManualSide[p.UserId] = (p == player) and "BLUE" or "RED"
+			end
+			if playerManualSide[p.UserId] == "BLUE" then
+				table.insert(blueList, p)
+			else
+				table.insert(redList, p)
+			end
+		end
+
+		local orderCounter = 1
+		createGroupHeader("BLUE", Color3.fromRGB(90, 175, 255), orderCounter)
+		orderCounter = orderCounter + 1
+
+		for _, p in ipairs(blueList) do
+			local inMatch = isInMatchWithMe(p)
+			local sideBtn, toggleNoBtn = createPlayerEntry(p, "BLUE", inMatch, orderCounter)
+			orderCounter = orderCounter + 1
+
+			sideBtn.MouseButton1Click:Connect(function()
+				playerManualSide[p.UserId] = "RED"
+				lockedTargetTorso = nil
+				refreshTeamList()
+			end)
+
+			toggleNoBtn.MouseButton1Click:Connect(function()
+				playerExcludedNo[p.UserId] = not playerExcludedNo[p.UserId]
+				if playerExcludedNo[p.UserId] and lockedTargetTorso and lockedTargetTorso.Parent and lockedTargetTorso.Parent == p.Character then
+					lockedTargetTorso = nil
+				end
+				refreshTeamList()
+			end)
+		end
+
+		createGroupHeader("RED", Color3.fromRGB(255, 95, 105), orderCounter)
+		orderCounter = orderCounter + 1
+
+		for _, p in ipairs(redList) do
+			local inMatch = isInMatchWithMe(p)
+			local sideBtn, toggleNoBtn = createPlayerEntry(p, "RED", inMatch, orderCounter)
+			orderCounter = orderCounter + 1
+
+			sideBtn.MouseButton1Click:Connect(function()
+				playerManualSide[p.UserId] = "BLUE"
+				lockedTargetTorso = nil
+				refreshTeamList()
+			end)
+
+			toggleNoBtn.MouseButton1Click:Connect(function()
+				playerExcludedNo[p.UserId] = not playerExcludedNo[p.UserId]
+				if playerExcludedNo[p.UserId] and lockedTargetTorso and lockedTargetTorso.Parent and lockedTargetTorso.Parent == p.Character then
+					lockedTargetTorso = nil
+				end
+				refreshTeamList()
+			end)
+		end
+
+		task.defer(function()
+			listScroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 6)
+		end)
+	end
+
+	createQuickBtn("ALL SÍ", 0, 56, Color3.fromRGB(32, 96, 48), function()
+		for _, p in ipairs(Players:GetPlayers()) do
+			playerExcludedNo[p.UserId] = false
+		end
+		refreshTeamList()
+	end)
+
+	createQuickBtn("ALL NO", 60, 56, Color3.fromRGB(120, 32, 36), function()
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= player then
+				playerExcludedNo[p.UserId] = true
+			end
+		end
+		lockedTargetTorso = nil
+		refreshTeamList()
+	end)
+
+	createQuickBtn("MATCH SÍ", 120, 66, Color3.fromRGB(36, 76, 130), function()
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= player then
+				playerExcludedNo[p.UserId] = not isInMatchWithMe(p)
+			end
+		end
+		lockedTargetTorso = nil
+		refreshTeamList()
+	end)
+
+	refreshTeamList()
+	Players.PlayerAdded:Connect(refreshTeamList)
+	Players.PlayerRemoving:Connect(function(leftPlr)
+		playerManualSide[leftPlr.UserId] = nil
+		playerExcludedNo[leftPlr.UserId] = nil
+		if lockedTargetTorso and lockedTargetTorso.Parent and lockedTargetTorso.Parent == leftPlr.Character then
+			lockedTargetTorso = nil
+		end
+		refreshTeamList()
+	end)
+
+	local listSyncTimer = 0
+	RunService.Heartbeat:Connect(function(dt)
+		listSyncTimer = listSyncTimer + dt
+		if listSyncTimer >= 1.5 then
+			listSyncTimer = 0
+			if not teamMinimized then
+				refreshTeamList()
+			end
+		end
+	end)
+
+	local teamMinimized = false
+	teamToggleBtn.MouseButton1Click:Connect(function()
+		teamMinimized = not teamMinimized
+		teamBody.Visible = not teamMinimized
+		if teamMinimized then
+			teamPanel.Size = UDim2.new(0, 196, 0, 24)
+			teamToggleBtn.Text = "SHOW"
+		else
+			teamPanel.Size = UDim2.new(0, 196, 0, 152)
+			teamToggleBtn.Text = "HIDE"
+			refreshTeamList()
+		end
+	end)
+
+	local lastUpdate = 0
+	local frameCount = 0
+	local currentFps = 60
+
+	-- ===== SEGUIMIENTO VISUAL AL TORSO DE ENEMIGOS SIN OBSTÁCULOS =====
+	local throttle = 0
+	local torsoYOffset = -8
+	local shortestDistance = 460
+
+	RunService.RenderStepped:Connect(function(dt)
+		frameCount = frameCount + 1
+		lastUpdate = lastUpdate + dt
+		if lastUpdate >= 0.5 then
+			currentFps = math.floor(frameCount / lastUpdate + 0.5)
+			frameCount = 0
+			lastUpdate = 0
+		end
+
+		local pingVal = 0
+		pcall(function()
+			pingVal = math.floor(player:GetNetworkPing() * 1000)
+		end)
+
+		lblFps.Text = string.format("FPS.........: %d", currentFps)
+		lblPhysics.Text = string.format("Physics.....: %.1f / %.1f msec", dt * 1000, 16.6)
+		lblRender.Text = string.format("Render......: %.1f / %.1f msec", dt * 1000, 16.6)
+		lblNetwork.Text = string.format("Network receive: %d ms ping", pingVal)
+
+		local currentCam = Workspace.CurrentCamera
+		camera = currentCam
+
+		local myChar = player.Character
+		if not myChar or not camera then
+			lockedTargetTorso = nil
+			return
+		end
+
+		local myHumanoid = myChar:FindFirstChildOfClass("Humanoid")
+		if not myHumanoid or myHumanoid.Health <= 0 then
+			lockedTargetTorso = nil
+			return
+		end
+
+		local hasWeapon = myChar:FindFirstChildOfClass("Tool") ~= nil
+
+		if hasWeapon then
+			throttle = throttle + dt
+			if throttle >= 0.02 then
+				throttle = 0
+
+				local bestTarget = nil
+				local bestDist = shortestDistance
+				local centerScreen = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5)
+
+				if lockedTargetTorso and lockedTargetTorso.Parent then
+					local enemyChar = lockedTargetTorso.Parent
+					local enemyPlayer = Players:GetPlayerFromCharacter(enemyChar)
+					local humanoid = enemyChar:FindFirstChildOfClass("Humanoid")
+
+					if enemyPlayer and isEnemy(enemyPlayer) and humanoid and humanoid.Health > 0 then
+						local screenPoint, onScreen = camera:WorldToViewportPoint(lockedTargetTorso.Position)
+						if onScreen and screenPoint.Z > 0 and isNotCovered(camera, myChar, enemyChar, lockedTargetTorso) then
+							bestTarget = lockedTargetTorso
+						end
+					end
+				end
+
+				if not bestTarget then
+					for _, otherPlayer in ipairs(Players:GetPlayers()) do
+						if isEnemy(otherPlayer) then
+							local enemyChar = otherPlayer.Character
+							if enemyChar then
+								local humanoid = enemyChar:FindFirstChildOfClass("Humanoid")
+								local torso = getTargetTorso(enemyChar)
+
+								if humanoid and humanoid.Health > 0 and torso then
+									local screenPoint, onScreen = camera:WorldToViewportPoint(torso.Position)
+									if onScreen and screenPoint.Z > 0 then
+										local dist = (Vector2.new(screenPoint.X, screenPoint.Y) - centerScreen).Magnitude
+										if dist < bestDist and isNotCovered(camera, myChar, enemyChar, torso) then
+											bestDist = dist
+											bestTarget = torso
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+
+				lockedTargetTorso = bestTarget
+			end
+
+			if lockedTargetTorso and lockedTargetTorso.Parent then
+				local screenPoint, onScreen = camera:WorldToViewportPoint(lockedTargetTorso.Position)
+				if onScreen and screenPoint.Z > 0 and isNotCovered(camera, myChar, lockedTargetTorso.Parent, lockedTargetTorso) then
+					local targetPos = UDim2.new(0, screenPoint.X, 0, screenPoint.Y + torsoYOffset)
+					crosshairContainer.Position = crosshairContainer.Position:Lerp(targetPos, 0.65)
+				else
+					lockedTargetTorso = nil
+					crosshairContainer.Position = crosshairContainer.Position:Lerp(defaultPos, 0.45)
+				end
+			else
+				crosshairContainer.Position = crosshairContainer.Position:Lerp(defaultPos, 0.45)
+			end
+		else
+			lockedTargetTorso = nil
+			crosshairContainer.Position = crosshairContainer.Position:Lerp(defaultPos, 0.45)
+		end
+	end)
+
+	-- Detección de armas en el personaje
+	local function monitorCharacter(char)
+		local function checkWeapon()
+			local equipped = false
+			for _, item in ipairs(char:GetChildren()) do
+				if item:IsA("Tool") then
+					equipped = true
+					break
+				end
+			end
+			setCrosshairStyle(equipped)
+		end
+
+		checkWeapon()
+
+		char.ChildAdded:Connect(function(child)
+			if child:IsA("Tool") then
+				task.defer(checkWeapon)
+			end
+		end)
+
+		char.ChildRemoved:Connect(function(child)
+			if child:IsA("Tool") then
+				task.defer(checkWeapon)
+			end
+		end)
+	end
+
+	if player.Character then
+		monitorCharacter(player.Character)
+	end
+
+	player.CharacterAdded:Connect(monitorCharacter)
+end
+
+task.spawn(function()
+	local success, err = pcall(initializeScript)
+	if not success then
+		warn("Error al iniciar el script: " .. tostring(err))
+	end
+end)
